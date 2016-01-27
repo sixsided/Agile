@@ -10,14 +10,14 @@ def open_url(url):
     sublime.active_window().run_command('open_url', {"url": url})
 
 def init_prefs():
-    with open(PREFS_PATH, 'wb') as json_file:
+    with open(PREFS_PATH, 'w') as json_file:
         prefs = { 'jira_root' : 'https://example.jira.com' }
         json.dump(prefs, json_file)
 
 def load_prefs():
     ensure_path(PREFS_PATH)
 
-    with open(PREFS_PATH, 'r+') as json_file:
+    with open(PREFS_PATH, mode='r+', encoding='utf-8') as json_file:
         try:
             json_data = json.load(json_file)
             return json_data
@@ -31,12 +31,12 @@ def ensure_path(path, is_folder=False):
         if is_folder:
             os.makedirs(path)
         else:
-            open(path, 'wb').close()
+            open(path, 'w').close()
 
 def open_sprint_folders(origin):
     sprint_folders = []
     sprint_titles = []
-    
+
     ensure_path(SPRINTS_PATH, True)
 
     # get existing sprint folders
@@ -50,13 +50,16 @@ def open_sprint_folders(origin):
 
     # read the metadata file from each directory to get sprint titles for displaying in the quick_panel
     for folder in sprint_folders:
-        with open(SPRINTS_PATH + folder + '/metadata.json', 'rb') as metadata_file:
+        with open(SPRINTS_PATH + folder + '/metadata.json', mode='r', encoding='utf-8') as metadata_file:
             json_data = json.load(metadata_file)
             sprint_titles.append(json_data['title'])
 
-    origin.window.show_quick_panel(sprint_titles, origin.sprint_selected)
-    
+    origin.window.show_quick_panel(sprint_titles, origin.sprint_selected, 0, 0)
+
     return sprint_folders
+
+def show_quick_panel(origin, options, done):
+        sublime.set_timeout(lambda: origin.window.show_quick_panel(options, done), 10)
 
 # hold reference to sprint folder
 # show stories in sprint
@@ -71,14 +74,14 @@ def select_story(origin, sprint_path, index):
         # TODO: do this better
         story_paths[:] = [x for x in story_paths if not x.startswith('.')]
         story_paths[:] = [x for x in story_paths if not x.startswith('metadata.json')]
-        
+
         # read the title from each story.json, stuff it into the story_titles for the dispay with a quick_panel
         for story_path in story_paths:
-            with open(sprint_path + '/' + story_path, 'rb') as story_file:
+            with open(sprint_path + '/' + story_path, mode='r', encoding='utf-8') as story_file:
                 json_data = json.load(story_file)
                 story_titles.append(json_data['title'])
 
-        origin.window.show_quick_panel(story_titles, origin.story_selected)
+        show_quick_panel(origin, story_titles, origin.story_selected)
 
         # return paths to reference by index after selection
         return story_titles, story_paths
@@ -98,17 +101,17 @@ class SaveStoryCommand(sublime_plugin.WindowCommand):
     def sprint_selected(self, index):
         self.sprint_path = SPRINTS_PATH + self.sprint_folders[index]
         self.window.show_input_panel('Story Title: ', '', self.save_story, None, None)
-      
+
     def save_story(self, story_title):
         w = self.window
 
         # make the title safe to save as a file
         keepcharacters = (' ','.','_')
         story_path = self.sprint_path + '/' + "".join(c for c in story_title if c.isalnum() or c in keepcharacters).rstrip() + '.json'
-        
-        with open(story_path, 'wb') as json_file:
+
+        with open(story_path, 'w') as json_file:
             data = { 'title' : story_title, 'groups' : [] }
-            
+
             num_groups = w.num_groups()
             if num_groups > 0:
                 for i in range(num_groups):
@@ -135,7 +138,6 @@ class SaveStoryCommand(sublime_plugin.WindowCommand):
 # display sprint folders via quick panel
 # display stories associated w/ a sprint
 class OpenStoryCommand(sublime_plugin.WindowCommand):
-
     def run(self):
         self.prefs = load_prefs()
         self.sprint_folders  = open_sprint_folders(self)
@@ -149,20 +151,21 @@ class OpenStoryCommand(sublime_plugin.WindowCommand):
     # open the views
     def story_selected(self, index):
         w = self.window
-        # close any already open files
+        # close any already open files:
         w.run_command('close_all')
+
         if index != -1:
             self.story_path = self.story_paths[index]
             if self.prefs['jira_root'] != 'https://example.jira.com':
                 url = self.prefs['jira_root'] + '/browse/' + str(self.story_titles[index]).strip('[]').strip("'")
-                print url
                 open_url(url)
-            
-            with open(self.sprint_path + '/' + self.story_path, 'rb') as json_file:
+
+            with open(self.sprint_path + '/' + self.story_path, mode='r', encoding='utf-8') as json_file:
                 json_data = json.load(json_file)
 
                 # create the view groups
                 num_groups = len(json_data['groups'])
+
                 if num_groups > 1:
                     self.set_layout(num_groups)
                     #iterate the groups
@@ -210,14 +213,14 @@ class DeleteStoryCommand(sublime_plugin.WindowCommand):
     def story_selected(self, index):
         if index != -1:
             self.story_path = self.story_paths[index]
-            self.window.show_quick_panel(['nevermind', 'really delete this story'], self.you_sure_brah)
+            show_quick_panel(self, ['nevermind', 'really delete this story'], self.you_sure_brah)
 
     def you_sure_brah(self, index):
         if index == 1:
             os.remove(self.sprint_path + '/' + self.story_path)
         else:
             return
-            
+
 
 # prompt user with input panel
 # create sprint folder
@@ -232,17 +235,17 @@ class CreateSprintCommand(sublime_plugin.WindowCommand):
         # make the title safe to save as a directory
         keepcharacters = (' ','.','_')
         sprint_path = SPRINTS_PATH + "".join(c for c in sprint_title if c.isalnum() or c in keepcharacters).rstrip()
-        
+
         try:
             os.mkdir(sprint_path)
-            
+
             # save a metadata json file
             metadata_path = sprint_path + '/metadata.json'
-            
-            with open(metadata_path, 'wb') as metadata_file:
+
+            with open(metadata_path, mode='w') as metadata_file:
                 data = { 'title' : sprint_title }
                 json.dump(data, metadata_file)
-        except OSError as exc: 
+        except OSError as exc:
             if exc.errno == errno.EEXIST and os.path.isdir(path):
                 # TODO: show error
                 pass
@@ -255,7 +258,7 @@ class DeleteSprintCommand(sublime_plugin.WindowCommand):
 
     def sprint_selected(self, index):
         self.sprint_path = SPRINTS_PATH + self.sprint_folders[index]
-        self.window.show_quick_panel(['nevermind', 'really delete this sprint'], self.you_sure_brah)
+        show_quick_panel(self, ['nevermind', 'really delete this sprint'], self.you_sure_brah)
 
     def you_sure_brah(self, index):
         if index == 1:
@@ -270,8 +273,8 @@ class ConfigureJiraCommand(sublime_plugin.WindowCommand):
       json_data = load_prefs()
       self.window.show_input_panel('Enter Jira Root Url: ', json_data['jira_root'], self.jira_added, None, None)
 
-    def jira_added(self, jira_root):        
-        with open(PREFS_PATH, 'r+') as json_file:
+    def jira_added(self, jira_root):
+        with open(PREFS_PATH, mode='r+', encoding='utf-8') as json_file:
             data = json.load(json_file)
             data['jira_root'] = jira_root
             json_file.seek(0)  # write to the start of the file
